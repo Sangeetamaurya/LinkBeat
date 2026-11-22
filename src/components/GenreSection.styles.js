@@ -1,0 +1,53 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../theme/colors';
+
+export const styles = StyleSheet.create({
+  section: { marginTop: 28 },
+  banner: {
+    height: 84,
+    borderRadius: 22,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+  },
+  fill: { ...StyleSheet.absoluteFillObject },
+  artWrap: {
+    position: 'absolute',
+    right: -14,
+    top: -12,
+    width: 110,
+    height: 110,
+    borderRadius: 18,
+    overflow: 'hidden',
+    transform: [{ rotate: '12deg' }],
+    opacity: 0.9,
+  },
+  art: { width: 110, height: 110, borderRadius: 18 },
+  iconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textBox: { marginLeft: 12, flex: 1 },
+  title: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  subtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 },
+  seeAll: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 62,
+  },
+  seeAllText: { color: colors.textPrimary, fontSize: 11, fontWeight: '700' },
+  carousel: { marginTop: 14 },
+});
