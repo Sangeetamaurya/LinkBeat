@@ -1,0 +1,50 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../theme/colors';
+
+export const styles = StyleSheet.create({
+  card: {
+    width: 170,
+    height: 210,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#1A1A1A',
+    marginRight: 12,
+  },
+  image: { ...StyleSheet.absoluteFillObject },
+  fill: { ...StyleSheet.absoluteFillObject },
+  like: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottom: {
+    position: 'absolute',
+    left: 14,
+    right: 12,
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  textBox: { flex: 1 },
+  title: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  artist: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  arrow: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.glass,
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+});

@@ -1,0 +1,55 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../theme/colors';
+
+export const styles = StyleSheet.create({
+  card: {
+    height: 215,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#1A1A1A',
+  },
+  image: { ...StyleSheet.absoluteFillObject },
+  fill: { ...StyleSheet.absoluteFillObject },
+  badge: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  badgeText: {
+    color: colors.textPrimary,
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 5,
+  },
+  info: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderColor: colors.glassBorder,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 10,
+  },
+  thumb: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    backgroundColor: '#2A2A2A',
+  },
+  textBox: { flex: 1, marginLeft: 12 },
+  title: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  artist: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  time: { color: colors.textSecondary, fontSize: 12 },
+});
