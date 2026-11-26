@@ -5,7 +5,8 @@ import InputField from '../components/InputField';
 import { passwordError, usernameError } from '../lib/auth';
 import { styles } from './AuthScreen.styles';
 
-// Log in / Sign up in one screen. onLogin and onSignup return an error text ('' means success).
+// Log in / Sign up in one screen. onLogin and onSignup are async (they call the backend)
+// and give back an error text ('' means success).
 export default function AuthScreen({ initialMode = 'signup', onLogin, onSignup, onSkip }) {
   const [mode, setMode] = useState(initialMode); // 'login' | 'signup'
   const [name, setName] = useState('');
@@ -13,6 +14,7 @@ export default function AuthScreen({ initialMode = 'signup', onLogin, onSignup, 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const isSignup = mode === 'signup';
 
@@ -21,7 +23,8 @@ export default function AuthScreen({ initialMode = 'signup', onLogin, onSignup, 
     setError('');
   };
 
-  const submit = () => {
+  const submit = async () => {
+    if (busy) return;
     if (isSignup) {
       if (name.trim() === '') return setError('Please enter your name');
       const uErr = usernameError(username);
@@ -29,12 +32,16 @@ export default function AuthScreen({ initialMode = 'signup', onLogin, onSignup, 
       const pErr = passwordError(password);
       if (pErr) return setError(pErr);
       if (password !== confirm) return setError('Passwords do not match');
-      setError(onSignup({ name: name.trim(), username: username.trim(), password }));
+      setBusy(true);
+      setError(await onSignup({ name: name.trim(), username: username.trim(), password }));
+      setBusy(false);
     } else {
       if (username.trim() === '' || password === '') {
         return setError('Enter your username and password');
       }
-      setError(onLogin(username.trim(), password));
+      setBusy(true);
+      setError(await onLogin(username.trim(), password));
+      setBusy(false);
     }
   };
 
@@ -106,8 +113,10 @@ export default function AuthScreen({ initialMode = 'signup', onLogin, onSignup, 
 
           {error !== '' && <Text style={styles.error}>{error}</Text>}
 
-          <Pressable onPress={submit} style={styles.button}>
-            <Text style={styles.buttonText}>{isSignup ? 'Create account' : 'Log in'}</Text>
+          <Pressable onPress={submit} style={[styles.button, busy && { opacity: 0.6 }]} disabled={busy}>
+            <Text style={styles.buttonText}>
+              {busy ? 'Please wait...' : isSignup ? 'Create account' : 'Log in'}
+            </Text>
           </Pressable>
 
           <Pressable onPress={onSkip} style={styles.guestLink}>

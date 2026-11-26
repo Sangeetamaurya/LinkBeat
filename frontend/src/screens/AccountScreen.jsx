@@ -8,21 +8,21 @@ import { passwordError } from '../lib/auth';
 import { styles } from './AccountScreen.styles';
 
 // Account details, change password, log out and delete account.
-// onChangePassword(old, new) returns an error text, or '' when it worked.
+// onChangePassword(old, new) is async and gives back an error text, or '' when it worked.
 export default function AccountScreen({ user, onBack, onChangePassword, onLogout, onDelete }) {
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
   const [message, setMessage] = useState({ text: '', ok: false });
 
-  const save = () => {
+  const save = async () => {
     if (oldPass === '' || newPass === '') {
       return setMessage({ text: 'Fill in all the password boxes', ok: false });
     }
     const pErr = passwordError(newPass);
     if (pErr) return setMessage({ text: pErr, ok: false });
     if (newPass !== confirm) return setMessage({ text: 'New passwords do not match', ok: false });
-    const err = onChangePassword(oldPass, newPass);
+    const err = await onChangePassword(oldPass, newPass);
     if (err) return setMessage({ text: err, ok: false });
     setOldPass('');
     setNewPass('');

@@ -13,10 +13,12 @@ import SearchBar from '../components/SearchBar';
 import RecentRow from '../components/RecentRow';
 import GenreTileLoader from '../components/GenreTileLoader';
 import SongRow from '../components/SongRow';
+import GenreChip from '../components/GenreChip';
 import BottomDock from '../components/BottomDock';
 import { usePlayer } from '../context/PlayerContext';
 import { GENRES, termFor } from '../data/genres';
 import { searchSongs } from '../lib/api';
+import { songsApi } from '../lib/backend';
 import { colors } from '../theme/colors';
 import { styles } from './SearchScreen.styles';
 
@@ -35,6 +37,7 @@ export default function SearchScreen({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [suggestions, setSuggestions] = useState([]);
 
   const trimmed = query.trim();
 
@@ -74,6 +77,27 @@ export default function SearchScreen({
       clearTimeout(timer);
     };
   }, [trimmed, retryKey]);
+
+  // suggestions while typing (the backend finds them with a Trie)
+  useEffect(() => {
+    if (trimmed.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      songsApi
+        .suggest(trimmed)
+        .then((list) => {
+          if (!cancelled) setSuggestions(list.filter((s) => s.toLowerCase() !== trimmed.toLowerCase()).slice(0, 5));
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [trimmed]);
 
   const playResult = (index) => {
     onAddRecent(trimmed);
@@ -142,6 +166,13 @@ export default function SearchScreen({
           </>
         ) : (
           <View style={styles.resultsBox}>
+            {suggestions.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 }}>
+                {suggestions.map((text) => (
+                  <GenreChip key={text} label={text} selected={false} onPress={() => setQuery(text)} />
+                ))}
+              </View>
+            )}
             {loading && (
               <ActivityIndicator style={styles.loader} color={colors.textPrimary} />
             )}

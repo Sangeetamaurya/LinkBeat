@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BackHandler, View } from 'react-native';
+import { Alert, BackHandler, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -17,6 +17,10 @@ import NowPlayingScreen from './src/screens/NowPlayingScreen';
 import { PlayerProvider } from './src/context/PlayerContext';
 import { useRecentSearches } from './src/hooks/useRecentSearches';
 import { usernameError } from './src/lib/auth';
+import { authApi, meApi, profileApi } from './src/lib/backend';
+import { setToken, setUnauthorizedHandler } from './src/lib/client';
+import { idle, setSyncEnabled } from './src/lib/sync';
+import { flushListening } from './src/lib/listenBuffer';
 import { styles } from './App.styles';
 
 export default function App() {
@@ -28,14 +32,10 @@ export default function App() {
   const [showPlayer, setShowPlayer] = useState(false);
   const searches = useRecentSearches();
 
-  // Accounts live in memory (frontend only): they are gone when the app is closed.
-  const [accounts, setAccounts] = useState([]); // { name, username, password, genres, avatar }
-  const [currentUsername, setCurrentUsername] = useState(null); // null means guest
-
-  const account = accounts.find((a) => a.username === currentUsername) || null;
-  const user = account
-    ? { name: account.name, username: account.username, genres: account.genres, avatar: account.avatar }
-    : null; // null means default (guest) home
+  // The account lives on the backend. The app keeps the logged in user (null means guest)
+  // and what the backend saved for that user (hydration), which the player takes over.
+  const [user, setUser] = useState(null); // { id, name, username, genres, avatar }
+  const [hydration, setHydration] = useState(null);
 
   const goMain = () => {
     setTab('home');
@@ -63,73 +63,131 @@ export default function App() {
     if (key === 'home' || key === 'search' || key === 'library' || key === 'profile') setTab(key);
   };
 
-  // ---- accounts ----
-  const signup = ({ name, username, password }) => {
-    const key = username.toLowerCase();
-    if (accounts.some((a) => a.username === key)) return 'That username is already taken';
-    setAccounts((list) => [...list, { name, username: key, password, genres: [], avatar: '' }]);
-    setCurrentUsername(key);
-    setScreen('setup'); // next: pick genres and a photo
-    return '';
+  // ---- accounts (all of this talks to the backend) ----
+  const EMPTY_STATE = { liked: [], history: [], playCounts: {}, listenByDay: [0, 0, 0, 0, 0, 0, 0], recents: [], queue: null };
+
+  // token received: remember it, then load everything saved for this user
+  const startSession = async (data) => {
+    setToken(data.token);
+    setSyncEnabled(true);
+    let state = EMPTY_STATE;
+    try {
+      state = await meApi.state();
+    } catch (e) {
+      // the data can be loaded later; the account itself works
+    }
+    searches.reset(state.recents);
+    setUser(state.user || data.user);
+    setHydration(state);
   };
 
-  const login = (username, password) => {
-    const found = accounts.find((a) => a.username === username.toLowerCase());
-    if (!found || found.password !== password) return 'Wrong username or password';
-    setCurrentUsername(found.username);
-    goMain();
-    return '';
+  // forget the login on this phone (after the last changes were sent)
+  const endSession = async ({ callServer }) => {
+    await flushListening();
+    await idle();
+    if (callServer) await authApi.logout().catch(() => {});
+    setSyncEnabled(false);
+    setToken(null);
   };
 
-  const logout = () => {
+  const resetLocal = () => {
     setShowPlayer(false);
     setSub(null);
-    setCurrentUsername(null);
+    setUser(null);
+    setHydration(null);
+    searches.reset([]);
     setTab('home');
     setScreen('onboarding');
   };
 
-  const deleteAccount = () => {
-    setAccounts((list) => list.filter((a) => a.username !== currentUsername));
-    logout();
+  // each of these returns an error text ('' means it worked)
+  const signup = async ({ name, username, password }) => {
+    try {
+      await startSession(await authApi.signup(name, username, password));
+      setScreen('setup'); // next: pick genres and a photo
+      return '';
+    } catch (e) {
+      return e.message;
+    }
   };
 
-  const changePassword = (oldPassword, newPassword) => {
-    if (!account || account.password !== oldPassword) return 'Current password is wrong';
-    setAccounts((list) =>
-      list.map((a) => (a.username === currentUsername ? { ...a, password: newPassword } : a))
-    );
-    return '';
+  const login = async (username, password) => {
+    try {
+      await startSession(await authApi.login(username, password));
+      goMain();
+      return '';
+    } catch (e) {
+      return e.message;
+    }
   };
 
-  // save name / username / genres / photo of the logged in user
-  const updateProfile = (data) => {
-    const newKey = (data.username || currentUsername).trim().toLowerCase();
-    setAccounts((list) =>
-      list.map((a) =>
-        a.username === currentUsername
-          ? { ...a, name: data.name, username: newKey, genres: data.genres, avatar: data.avatar }
-          : a
-      )
-    );
-    setCurrentUsername(newKey);
+  const logout = () => {
+    resetLocal();
+    endSession({ callServer: true });
   };
 
-  const changeAvatar = (uri) => {
-    setAccounts((list) =>
-      list.map((a) => (a.username === currentUsername ? { ...a, avatar: uri } : a))
-    );
+  // the server said our login is no longer valid
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      resetLocal();
+      setSyncEnabled(false);
+      setToken(null);
+      setScreen('auth');
+    });
+    return () => setUnauthorizedHandler(null);
+  });
+
+  const deleteAccount = async () => {
+    try {
+      await authApi.deleteAccount();
+    } catch (e) {
+      Alert.alert('Could not delete the account', e.message);
+      return;
+    }
+    // the account is gone, so there is nothing left to send
+    setSyncEnabled(false);
+    setToken(null);
+    resetLocal();
   };
 
-  // username rules + nobody else uses it
-  const checkUsername = (text) => {
-    const problem = usernameError(text);
-    if (problem) return problem;
-    const key = text.trim().toLowerCase();
-    return accounts.some((a) => a.username === key && a.username !== currentUsername)
-      ? 'That username is already taken'
-      : '';
+  const changePassword = async (oldPassword, newPassword) => {
+    try {
+      await authApi.changePassword(oldPassword, newPassword);
+      return '';
+    } catch (e) {
+      return e.message;
+    }
   };
+
+  // save name / username / genres / photo of the logged in user. Returns an error text or ''.
+  const updateProfile = async (data) => {
+    try {
+      const result = await profileApi.save({
+        name: data.name,
+        username: data.username,
+        genres: data.genres,
+        avatar: data.avatar,
+      });
+      setUser(result.user);
+      return '';
+    } catch (e) {
+      return e.message;
+    }
+  };
+
+  const changeAvatar = async (avatar) => {
+    const before = user;
+    setUser((u) => (u ? { ...u, avatar } : u)); // show it at once
+    try {
+      await profileApi.saveAvatar(avatar);
+    } catch (e) {
+      setUser(before);
+      Alert.alert('Could not save your photo', e.message);
+    }
+  };
+
+  // username rules (the backend checks if it is taken while the user types)
+  const checkUsername = (text) => usernameError(text);
 
   // "See All" on a Home genre row (or an artist on Profile) opens Search with that text
   const openGenre = (label) => {
@@ -144,7 +202,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <PlayerProvider>
+      <PlayerProvider hydration={hydration}>
         {screen === 'onboarding' && (
           <OnboardingScreen onGetStarted={() => setScreen('auth')} onSkip={goMain} />
         )}
@@ -157,9 +215,10 @@ export default function App() {
           <ProfileSetupScreen
             initial={user || {}}
             checkUsername={checkUsername}
-            onContinue={(data) => {
-              updateProfile(data);
-              goMain();
+            onContinue={async (data) => {
+              const err = await updateProfile(data);
+              if (!err) goMain();
+              return err;
             }}
             onSkip={goMain}
           />
@@ -219,9 +278,10 @@ export default function App() {
                     editing
                     initial={user}
                     checkUsername={checkUsername}
-                    onContinue={(data) => {
-                      updateProfile(data);
-                      setSub(null);
+                    onContinue={async (data) => {
+                      const err = await updateProfile(data);
+                      if (!err) setSub(null);
+                      return err;
                     }}
                     onSkip={() => setSub(null)}
                   />

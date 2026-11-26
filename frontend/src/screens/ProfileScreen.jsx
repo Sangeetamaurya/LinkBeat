@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,6 +8,9 @@ import CoverImage from '../components/CoverImage';
 import BottomDock from '../components/BottomDock';
 import { usePlayer } from '../context/PlayerContext';
 import { listenedText, listenedValue, topArtists } from '../lib/profileStats';
+import { AVATAR_PICKER_OPTIONS, avatarFromAsset } from '../lib/avatar';
+import { meApi } from '../lib/backend';
+import { idle as idleSync } from '../lib/sync';
 import { colors } from '../theme/colors';
 import { styles } from './ProfileScreen.styles';
 
@@ -43,7 +46,30 @@ export default function ProfileScreen({
 
   const totalSeconds = listenByDay.reduce((a, b) => a + b, 0);
   const listened = listenedValue(totalSeconds);
-  const artists = useMemo(() => topArtists(playCounts, likedSongs), [playCounts, likedSongs]);
+  const localArtists = useMemo(() => topArtists(playCounts, likedSongs), [playCounts, likedSongs]);
+
+  // logged in: the backend works out the top artists (heap) from what it has saved
+  const [serverStats, setServerStats] = useState(null);
+  useEffect(() => {
+    if (!user) {
+      setServerStats(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      idleSync()
+        .then(() => meApi.stats())
+        .then((s) => {
+          if (!cancelled) setServerStats(s);
+        })
+        .catch(() => {});
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [user && user.username, likedSongs, playCounts]);
+  const artists = serverStats ? serverStats.topArtists : localArtists;
 
   const today = (new Date().getDay() + 6) % 7; // Monday = 0
   const maxDay = Math.max(...listenByDay, 1);
@@ -54,14 +80,9 @@ export default function ProfileScreen({
       return;
     }
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
+      const result = await ImagePicker.launchImageLibraryAsync(AVATAR_PICKER_OPTIONS);
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        onChangeAvatar(result.assets[0].uri);
+        onChangeAvatar(avatarFromAsset(result.assets[0]));
       }
     } catch (e) {
       Alert.alert('Could not open your photos', 'Please try again.');

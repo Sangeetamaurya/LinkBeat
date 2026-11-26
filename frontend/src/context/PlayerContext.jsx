@@ -1,10 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { shuffleWithFirst } from '../lib/shuffle';
+import { enqueue } from '../lib/sync';
+import { addListening, dropListening, flushListening } from '../lib/listenBuffer';
 
 const PlayerContext = createContext(null);
 
-export function PlayerProvider({ children }) {
+const NO_DAYS = [0, 0, 0, 0, 0, 0, 0];
+
+// hydration = what the backend saved for the logged in user (null for a guest).
+// When it changes, the player takes over that data; when it becomes null everything is emptied.
+export function PlayerProvider({ children, hydration = null }) {
   const player = useAudioPlayer(null);
   const status = useAudioPlayerStatus(player);
 
@@ -19,12 +25,73 @@ export function PlayerProvider({ children }) {
   const [history, setHistory] = useState([]); // songs played, newest first (max 50)
   const [listenByDay, setListenByDay] = useState([0, 0, 0, 0, 0, 0, 0]); // seconds, Mon..Sun
 
+  const loadedUrl = useRef(null); // the song file that is loaded in the audio player right now
+  const queueSyncTimer = useRef(null);
+
   const likedIds = useMemo(() => likedSongs.map((s) => s.id), [likedSongs]);
 
   const currentSong = currentIndex >= 0 ? queue[currentIndex] : null;
   const isPlaying = status.playing;
   const position = status.currentTime || 0;
   const duration = status.duration > 0 ? status.duration : 30; // previews are 30 seconds
+
+  // take over the saved data of the user (login) or forget it all (logout)
+  useEffect(() => {
+    try {
+      player.pause();
+    } catch (e) {
+      // nothing was loaded yet
+    }
+    loadedUrl.current = null;
+    dropListening();
+    if (!hydration) {
+      setLikedSongs([]);
+      setPlayCounts({});
+      setHistory([]);
+      setListenByDay(NO_DAYS);
+      setQueue([]);
+      originalQueue.current = [];
+      setCurrentIndex(-1);
+      setShuffle(false);
+      setRepeat(false);
+      return;
+    }
+    setLikedSongs(hydration.liked || []);
+    setPlayCounts(hydration.playCounts || {});
+    setHistory(hydration.history || []);
+    setListenByDay(hydration.listenByDay || NO_DAYS);
+    const saved = hydration.queue;
+    if (saved && saved.songs && saved.songs.length > 0) {
+      // the queue comes back where the user left it (not playing; press play to continue)
+      originalQueue.current = saved.shuffle && saved.original.length > 0 ? saved.original : saved.songs;
+      setQueue(saved.songs);
+      setCurrentIndex(saved.currentIndex);
+      setShuffle(saved.shuffle);
+      setRepeat(saved.repeat);
+    } else {
+      setQueue([]);
+      originalQueue.current = [];
+      setCurrentIndex(-1);
+      setShuffle(false);
+      setRepeat(false);
+    }
+  }, [hydration]);
+
+  // keep the backend copy of the queue up to date (after the user stops changing it for a moment)
+  useEffect(() => {
+    if (queue.length === 0 || queue.length > 200 || currentIndex < 0) return;
+    clearTimeout(queueSyncTimer.current);
+    queueSyncTimer.current = setTimeout(() => {
+      enqueue('PUT', '/queue', {
+        songs: queue,
+        currentIndex,
+        shuffle,
+        repeat,
+        original: shuffle ? originalQueue.current : [],
+      });
+    }, 1000);
+    return () => clearTimeout(queueSyncTimer.current);
+  }, [queue, currentIndex, shuffle, repeat]);
 
   // let audio play even when the phone is on silent (iPhone)
   useEffect(() => {
@@ -37,8 +104,12 @@ export function PlayerProvider({ children }) {
     const timer = setInterval(() => {
       const day = (new Date().getDay() + 6) % 7; // Monday = 0 ... Sunday = 6
       setListenByDay((days) => days.map((sec, i) => (i === day ? sec + 1 : sec)));
+      addListening(1); // sent to the backend in batches
     }, 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      flushListening(); // paused or stopped: send what is left
+    };
   }, [status.playing]);
 
   // repeat = loop the current song
@@ -57,7 +128,9 @@ export function PlayerProvider({ children }) {
       [song.id]: { song, count: (counts[song.id] ? counts[song.id].count : 0) + 1 },
     }));
     setHistory((list) => [song, ...list.filter((s) => s.id !== song.id)].slice(0, 50));
+    enqueue('POST', '/history/play', { song });
     setCurrentIndex(index);
+    loadedUrl.current = song.url;
     player.replace(song.url);
     player.play();
   };
@@ -91,12 +164,17 @@ export function PlayerProvider({ children }) {
     if (isPlaying) {
       player.pause();
     } else {
+      // a queue restored from the backend has no song loaded yet
+      if (loadedUrl.current !== currentSong.url) {
+        loadedUrl.current = currentSong.url;
+        player.replace(currentSong.url);
+      }
       player.play();
     }
   };
 
   const seekTo = (seconds) => {
-    if (!currentSong) return;
+    if (!currentSong || loadedUrl.current !== currentSong.url) return;
     player.seekTo(seconds);
   };
 
@@ -119,6 +197,11 @@ export function PlayerProvider({ children }) {
 
   // liking a song saves it to the Library (Liked Songs); liking again removes it
   const toggleLike = (song) => {
+    if (likedSongs.some((s) => s.id === song.id)) {
+      enqueue('DELETE', '/library/liked/' + encodeURIComponent(song.id));
+    } else {
+      enqueue('POST', '/library/liked', { song });
+    }
     setLikedSongs((list) =>
       list.some((s) => s.id === song.id) ? list.filter((s) => s.id !== song.id) : [song, ...list]
     );
@@ -126,11 +209,16 @@ export function PlayerProvider({ children }) {
 
   // Settings actions
   const clearListening = () => {
+    dropListening();
+    enqueue('DELETE', '/history');
     setHistory([]);
     setPlayCounts({});
     setListenByDay([0, 0, 0, 0, 0, 0, 0]);
   };
-  const clearLiked = () => setLikedSongs([]);
+  const clearLiked = () => {
+    enqueue('DELETE', '/library/liked');
+    setLikedSongs([]);
+  };
 
   // the songs this user played the most (only counts what was played in this session)
   const mostPlayed = Object.values(playCounts)
