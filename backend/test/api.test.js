@@ -196,3 +196,71 @@ test('persistence: data survives a restart', async () => {
   assert.strictEqual(v.queue.currentSong.id, '2');
   assert.deepStrictEqual(v.recents.values(), ['pop']);
 });
+test('queue edge cases: un-shuffle restores order, repeat toggle, valid jump', async (t) => {
+  const { server, call } = await start();
+  t.after(() => server.close());
+  const { body: { token: T } } = await call('POST', '/auth/signup', {
+    name: 'QueueTester',
+    username: 'q_user',
+    password: 'password123',
+  });
+
+  const songs = [1, 2, 3, 4, 5].map((n) => S(n));
+  await call('PUT', '/queue', { songs, currentIndex: 2, shuffle: false, repeat: false }, T);
+
+  const jumped = await call('POST', '/queue/jump', { index: 3 }, T);
+  assert.strictEqual(jumped.status, 200);
+  assert.strictEqual(jumped.body.currentSong.id, '4');
+
+  await call('POST', '/queue/shuffle', {}, T);
+  const unshuffled = await call('POST', '/queue/shuffle', {}, T);
+  assert.strictEqual(unshuffled.body.shuffle, false);
+  assert.deepStrictEqual(unshuffled.body.songs.map((s) => s.id), ['1', '2', '3', '4', '5']);
+  assert.strictEqual(unshuffled.body.currentSong.id, '4');
+
+  const repOn = await call('POST', '/queue/repeat', {}, T);
+  assert.strictEqual(repOn.body.repeat, true);
+  const repOff = await call('POST', '/queue/repeat', {}, T);
+  assert.strictEqual(repOff.body.repeat, false);
+});
+
+test('security & isolation: User A cannot see or modify User B data, invalid JWT rejected', async (t) => {
+  const { server, call } = await start();
+  t.after(() => server.close());
+
+  const u1 = await call('POST', '/auth/signup', { name: 'Alice', username: 'alice_1', password: 'password123' });
+  const u2 = await call('POST', '/auth/signup', { name: 'Bob', username: 'bob_1', password: 'password123' });
+  const tokenA = u1.body.token;
+  const tokenB = u2.body.token;
+
+  await call('POST', '/library/liked', { song: S(1) }, tokenA);
+  await call('POST', '/searches', { term: 'alice secret' }, tokenA);
+
+  const bobLib = await call('GET', '/library', undefined, tokenB);
+  const bobSearch = await call('GET', '/searches', undefined, tokenB);
+  assert.strictEqual(bobLib.body.count, 0);
+  assert.strictEqual(bobSearch.body.recents.length, 0);
+
+  const fakeRes = await call('GET', '/auth/me', undefined, 'eyJhbGciOiJIUzI1NiJ9.fakepayload.fakesig');
+  assert.strictEqual(fakeRes.status, 401);
+});
+
+test('profile avatar endpoint & clear all searches', async (t) => {
+  const { server, call } = await start();
+  t.after(() => server.close());
+  const { body: { token: T } } = await call('POST', '/auth/signup', {
+    name: 'Ava',
+    username: 'ava_user',
+    password: 'password123',
+  });
+
+  const av = await call('PUT', '/profile/avatar', { avatar: 'data:image/png;base64,BBBB' }, T);
+  assert.strictEqual(av.status, 200);
+  assert.strictEqual(av.body.user.avatar, 'data:image/png;base64,BBBB');
+
+  await call('POST', '/searches', { term: 'one' }, T);
+  await call('POST', '/searches', { term: 'two' }, T);
+  const delAll = await call('DELETE', '/searches', undefined, T);
+  assert.strictEqual(delAll.status, 200);
+  assert.deepStrictEqual(delAll.body.recents, []);
+});

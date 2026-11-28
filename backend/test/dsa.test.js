@@ -99,3 +99,40 @@ test('shuffleWithFirst keeps first and all items', () => {
   assert.strictEqual(out[0], 3);
   assert.deepStrictEqual([...out].sort(), [1, 2, 3, 4, 5]);
 });
+test('LinkedHashMap edge cases: updating existing key moves to front without growing size', () => {
+  const m = new LinkedHashMap({ capacity: 3 });
+  m.set('x', 10);
+  m.set('y', 20);
+  m.set('x', 99);
+  assert.strictEqual(m.size, 2);
+  assert.strictEqual(m.get('x'), 99);
+  assert.deepStrictEqual(m.keys(), ['x', 'y']);
+  assert.strictEqual(m.get('non_existent'), undefined);
+  assert.strictEqual(m.delete('non_existent'), false);
+});
+
+test('PlayQueue edge cases: empty queue and single-song queue operations', () => {
+  const emptyQ = new PlayQueue();
+  assert.strictEqual(emptyQ.currentSong, null);
+  assert.strictEqual(emptyQ.next(), null);
+  assert.strictEqual(emptyQ.prev(), null);
+  assert.deepStrictEqual(emptyQ.window(4).songs, []);
+
+  const singleQ = new PlayQueue().load([song(1)], 0);
+  assert.strictEqual(singleQ.next().id, '1');
+  assert.strictEqual(singleQ.prev().id, '1');
+  singleQ.toggleShuffle();
+  assert.strictEqual(singleQ.currentSong.id, '1');
+});
+
+test('algorithms & heap edge cases: empty inputs and single-element arrays', () => {
+  const emptyHeap = new MinHeap();
+  assert.strictEqual(emptyHeap.pop(), undefined);
+  assert.strictEqual(emptyHeap.size, 0);
+
+  assert.deepStrictEqual(mergeSort([], (a, b) => a - b), []);
+  assert.deepStrictEqual(mergeSort([42], (a, b) => a - b), [42]);
+  assert.deepStrictEqual(roundRobinMerge([], 5), []);
+  assert.deepStrictEqual(shuffleWithFirst([], 0), []);
+  assert.deepStrictEqual(shuffleWithFirst(['only'], 0), ['only']);
+});
